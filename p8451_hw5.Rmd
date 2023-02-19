@@ -1,0 +1,104 @@
+---
+title: "Machine Learning for Epi: Assignment 5"
+output:
+  word_document: default
+  html_document: default
+date: "2023-02-21"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      warning = F,
+                      message = F)
+
+library(tidyverse)
+library(caret)
+library(klaR)
+library(glmnet)
+```
+
+# Predicting Current Alcohol Consumption from Behavioral Scores
+
+## Description of Data
+
+The data we will be using are from the online survey related to drug and alcohol use and personality traits. These data were collected as part of an online survey related to drug and alcohol use and personality traits from UCI. *We will be using this dataset to try to identify the most important behavioral predictors of alcohol consumption.* We have restricted the dataset to 7 features and an outcome which distinguishes those who reported current alcohol use (defined as alcohol use in the past month or more frequently) vs no current use. 
+
+### Step 1: Load data and prepare for analysis
+
+The code chunk below loads the Alcohol Consumption survey data and strips the id variable, omits missing observations, and converts the outcome variable, `alc_consumption` to a factor variable.
+
+```{r load_data}
+alcohol_use = readr::read_csv("./alcohol_use.csv") %>% 
+  mutate(alc_consumption = as.factor(alc_consumption)) %>% 
+  dplyr::select(-`...1`) %>% 
+  drop_na()  
+  
+summary(alcohol_use) %>% knitr::kable(digits = 2)
+```
+
+### Step 2: Partition the data
+
+The code chunk below partitions the data into training and testing sets, using a 70/30 split. 
+
+```{r partition_data}
+#Creating balanced partitions in the data
+train_index = createDataPartition(PAT_df$healthydays, p = 0.7, list = FALSE)
+
+PAT_train = PAT_df[train_index,]
+PAT_test = PAT_df[-train_index,]
+
+#Check distribution of the outcome between train and test data
+summary(PAT_test$healthydays) 
+summary(PAT_train$healthydays)
+```
+
+We can see that the training and testing sets have similar median, mean, and IQR ranges, indicating that the data were successfully partitioned.
+
+### Step 4: Construct linear regression models to predict healthy days
+
+We will fit two linear models to predict the number of days in a month an individual reported having good physical health (feature name: `healthydays`).
+
+- Model 1 (`lm_all`): Include all features
+
+- Model 2 (`lm_habits`): Include only health habits and physical activity variables (tobacco + alcohol + pa_min + walk_days + physical_act + diet)
+
+These models will be trained on the training dataset using 10-fold cross validation. The data will be centered and scaled within the  `preProc` option within `train()`. 
+
+```{r lm}
+#Perform 10-fold cross-validation
+control.settings = trainControl(method = "cv", number = 10)
+
+#Fit models using caret
+lm_all = train(healthydays ~., data = PAT_train, method = "lm", preProc = c("center", "scale"), trControl = control.settings)
+
+lm_habits = train(healthydays ~ tobacco + alcohol + pa_min + walk_days + physical_act + diet, data = PAT_train, method = "lm", preProc = c("center", "scale"), trControl = control.settings)
+
+# Output results
+rbind(lm_all$results, lm_habits$results) %>% 
+  mutate(Model = c("All", "Habits")) %>% 
+  relocate(Model, .before = intercept) %>% 
+  knitr::kable(digits = 3)
+```
+
+Results of the cross-validated training shows the model with all variables, `lm_all`, has a slightly lower RMSE compared to the model with only health habits. However, we want to confirm this by running each model on the testing data.
+
+### Step 5: Model Evaluation
+
+Next, to determine the preferred prediction model, we will apply both models to the test data, and compare their performance based on the RMSE, which is an evaluation metric used for linear regression models.
+
+```{r test}
+test_outcome1 = predict(lm_all, PAT_test)
+All_RMSE = RMSE(test_outcome1, PAT_test$healthydays)
+
+test_outcome2 = predict(lm_habits, PAT_test)
+Habits_RMSE = RMSE(test_outcome2, PAT_test$healthydays)
+
+cbind(All_RMSE, Habits_RMSE) %>% 
+  as_tibble() %>% 
+  knitr::kable(digits = 3)
+```
+
+The table shows that the `lm_all` model performs better on the test data, with an RMSE of 7.172, compared to the `lm_habits` model's RMSE of 7.413. Therefore, if I were only interested in prediction performance, I would select the linear model with all features over the linear model with health habit features to predict the number of healthy days in a month.
+
+One setting where the `lm_all` model would be useful would be in a program evaluation setting. For instance, in a health program that promotes increased physical activity, when enrolling new subjects, we could predict the number of healthy days they are predicted to have in a month at baseline, and then compare the number of observed healthy days after program participation. This provides evidence for evaluating the success of the physical activity program in improving the number of healthy days a person may have.
+

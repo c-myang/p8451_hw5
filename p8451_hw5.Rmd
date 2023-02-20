@@ -17,8 +17,6 @@ library(klaR)
 library(glmnet)
 ```
 
-# Predicting Current Alcohol Consumption from Behavioral Scores
-
 ## Description of Data
 
 The data we will be using are from the online survey related to drug and alcohol use and personality traits. These data were collected as part of an online survey related to drug and alcohol use and personality traits from the UCI Machine Learning Repository. *We will be using this dataset to try to identify the most important behavioral predictors of alcohol consumption.* We have restricted the dataset to 7 features and an outcome which distinguishes those who reported current alcohol use (defined as alcohol use in the past month or more frequently) vs no current use. 
@@ -59,7 +57,7 @@ summary(alc_test$alc_consumption)
 
 We can see that there are similar distributions of the variable `alc_consumption`, with approximately 53% of cases of alcohol use across both the training and testing sets, indicating that the data were successfully partitioned.
 
-### Step 4: Construct logistic regression models to predict healthy days
+### Step 3: Construct logistic regression models to predict healthy days
 
 We will fit 3 regularized and traditional logistic models to predict current alcohol consumption. (feature name: `alc_consumption`).
 
@@ -69,7 +67,9 @@ We will fit 3 regularized and traditional logistic models to predict current alc
 
 - Model 3 (`mod_lasso`): A LASSO logistic model based on all features.
 
-These models will be trained on the training dataset using 10-fold cross validation. 
+#### Elastic Net Model
+
+To fit the elastic net model, we will train using 10-fold cross-validation, and set the tune length to 10 combinations of alpha and lambda to train on.
 
 ```{r mod_elastic}
 set.seed(123)
@@ -84,6 +84,12 @@ mod_elastic$bestTune
 coef(mod_elastic$finalModel, mod_elastic$bestTune$lambda)
 ```
 
+The resulting model found an optimal \alpha of 0.6 and \lambda of 0.263. We can see that the features selected to be included in the model are Impulsivity and Sensation-Seeking Behaviors.
+
+#### Logistic Regression Model
+
+To fit the elastic net model, we will train using 10-fold cross-validation.
+
 ```{r mod_logistic}
 set.seed(123)
 
@@ -91,8 +97,13 @@ mod_baseline = train(alc_consumption ~ ., data = alc_train, method = "glm",
                  trControl = trainControl("cv", number = 10))
 
 coef(mod_baseline$finalModel)
-
 ```
+
+The resulting model includes all features to be fed into the model, with Impulsivity and Sensation-Seeking Behaviors having the largest effect size as indicated by the magnitude of their coefficients.
+
+#### LASSO Model
+
+To fit the elastic net model, we will train using 10-fold cross-validation, and fix alpha to 1. We then create a search grid of 100 to search for the optimal lambda value. 
 
 ```{r mod_LASSO}
 set.seed(123)
@@ -111,12 +122,11 @@ mod_lasso$bestTune
 coef(mod_lasso$finalModel, mod_lasso$bestTune$lambda)
 ```
 
+The resulting model found an optimal \lambda of 0.231. We can see that there was only 1 feature, Impulsivity, that was selected to be in the model.
 
-Results of the cross-validated training shows the model with all variables, `lm_all`, has a slightly lower RMSE compared to the model with only health habits. However, we want to confirm this by running each model on the testing data.
+### Step 4: Model Evaluation
 
-### Step 5: Model Evaluation
-
-Next, to determine the preferred prediction model, we will apply both models to the test data, and compare their performance based on the RMSE, which is an evaluation metric used for linear regression models.
+Next, to determine the preferred prediction model, we will apply both models to make predictions in the test data. We will use the `confusionMatrix()` function to get performance measures of accuracy, kappa, sensitivity, specificity, and precision (PPV) for each candidate model.
 
 ```{r test_EN}
 ## ELASTIC MODEL
@@ -125,10 +135,10 @@ en_pred = mod_elastic %>% predict(alc_test)
 alc_test = alc_test %>% mutate(en_pred = as.factor(en_pred))
 
 # Model prediction performance
-elastic_perf = postResample(en_pred, alc_test$alc_consumption) %>% as_tibble_row()
+cm_EN = confusionMatrix(data = alc_test$en_pred, reference = alc_test$alc_consumption, positive = "CurrentUse")
 
-ggplot(mod_elastic)
-confusionMatrix(data = alc_test$en_pred, reference = alc_test$alc_consumption, positive = "CurrentUse")
+EN_perf = cbind(cm_EN$overall %>% as_tibble_row(), cm_EN$byClass %>% as_tibble_row()) %>% 
+  dplyr::select(Accuracy, Kappa, Sensitivity, Specificity, Precision)
 ```
 
 ```{r test_baseline}
@@ -138,9 +148,10 @@ logmod_pred = mod_baseline %>% predict(alc_test)
 alc_test = alc_test %>% mutate(logmod_pred = as.factor(logmod_pred))
 
 # Model prediction performance
-baseline_perf = postResample(logmod_pred, alc_test$alc_consumption) %>% as_tibble_row()
+cm_log = confusionMatrix(data = alc_test$logmod_pred, reference = alc_test$alc_consumption, positive = "CurrentUse")
 
-confusionMatrix(data = alc_test$logmod_pred, reference = alc_test$alc_consumption, positive = "CurrentUse")
+log_perf = cbind(cm_log$overall %>% as_tibble_row(), cm_log$byClass %>% as_tibble_row()) %>% 
+  dplyr::select(Accuracy, Kappa, Sensitivity, Specificity, Precision)
 ```
 
 ```{r test_LASSO}
@@ -150,19 +161,25 @@ lasso_pred = mod_lasso %>% predict(alc_test)
 alc_test = alc_test %>% mutate(lasso_pred = as.factor(lasso_pred))
 
 # Model prediction performance
-LASSO_perf = postResample(lasso_pred, alc_test$alc_consumption) %>% as_tibble_row()
+cm_LASSO = confusionMatrix(data = alc_test$lasso_pred, reference = alc_test$alc_consumption, positive = "CurrentUse")
 
-confusionMatrix(data = alc_test$lasso_pred, reference = alc_test$alc_consumption, positive = "CurrentUse")
-
-rbind(elastic_perf, baseline_perf, LASSO_perf) %>% 
-  mutate(Model = c("Elastic Net", "Baseline", "LASSO")) %>% 
-  relocate(Model, .before = Accuracy) %>% knitr::kable()
+LASSO_perf = cbind(cm_LASSO$overall %>% as_tibble_row(), cm_LASSO$byClass %>% as_tibble_row()) %>% 
+  dplyr::select(Accuracy, Kappa, Sensitivity, Specificity, Precision)
 ```
 
-The table shows that the `lm_all` model performs better on the test data, with an RMSE of 7.172, compared to the `lm_habits` model's RMSE of 7.413. Therefore, if I were only interested in prediction performance, I would select the linear model with all features over the linear model with health habit features to predict the number of healthy days in a month.
+#### Comparing performance across models
+
+Finally, let's compare the performance of the 3 models.
+
+```{r compare}
+rbind(EN_perf, log_perf, LASSO_perf) %>% 
+  mutate(Model = c("Elastic Net", "Baseline", "LASSO")) %>% 
+  relocate(Model, .before = Accuracy) %>% knitr::kable(digits = 4)
+```
+
+The table shows that the elastic net and LASSO models have the same accuracy of 83.19%, outperforming the baseline model's accuracy of 80.35%. We see that the performance of elastic net and LASSO are also the same in terms of sensitivity, specificity, and precision. While the baseline model has a slightly lower accuracy, there is slightly better trade-off between specificity and sensitivity, resulting in a higher specificity, as well as improved precision. However, if I was interested in making sure I detect all cases of current alcohol use, I would go with the LASSO model, as it is a more parsimonious (simpler) model with 1 feature compared to the elastic net model with 2 features, while having the same predictive performance.
 
 
 ### Research Applications
 
-One setting where the `lm_all` model would be useful would be in a program evaluation setting. For instance, in a health program that promotes increased physical activity, when enrolling new subjects, we could predict the number of healthy days they are predicted to have in a month at baseline, and then compare the number of observed healthy days after program participation. This provides evidence for evaluating the success of the physical activity program in improving the number of healthy days a person may have.
-
+This analysis could directly address the research question of which behavioral features best predict current alcohol consumption, and therefore narrow down the list of behavioral tests clinicians may need to administer to patients in order to carry out this predictive task. One such application could be applying this predictive model to patients' electronic health records to predict current alcohol consumption among patients on the basis of behavioral test scores.

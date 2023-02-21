@@ -521,42 +521,45 @@ all features.</p></li>
 <div id="elastic-net-model" class="section level4">
 <h4>Elastic Net Model</h4>
 <p>To fit the elastic net model, we will train using 10-fold
-cross-validation, and set the tune length to 10 combinations of alpha
+cross-validation, and set the tune length to 100 combinations of alpha
 and lambda to train on.</p>
 <pre class="r"><code>set.seed(123)
 
 mod_elastic = train(alc_consumption ~ ., data = alc_train, method = &quot;glmnet&quot;, 
                  trControl = trainControl(&quot;cv&quot;, number = 10), 
-                 tuneLength = 10)
+                 tuneLength = 100)
 #Print the values of alpha and lambda that gave best prediction
 mod_elastic$bestTune</code></pre>
-<pre><code>##    alpha   lambda
-## 54   0.6 0.263144</code></pre>
+<pre><code>##          alpha    lambda
+## 2542 0.4363636 0.3853097</code></pre>
 <pre class="r"><code># Model coefficients
 coef(mod_elastic$finalModel, mod_elastic$bestTune$lambda)</code></pre>
 <pre><code>## 8 x 1 sparse Matrix of class &quot;dgCMatrix&quot;
 ##                                 s1
-## (Intercept)             0.14186305
+## (Intercept)             0.13745121
 ## neurotocism_score       .         
 ## extroversion_score      .         
 ## openness_score          .         
 ## agreeableness_score     .         
 ## conscientiousness_score .         
-## impulsiveness_score     0.44092293
-## sens_seeking_score      0.01380889</code></pre>
-<p>The resulting model found an optimal of 0.6 and of 0.263. We can see
-that the features selected to be included in the model are Impulsivity
-and Sensation-Seeking Behaviors.</p>
+## impulsiveness_score     0.30070826
+## sens_seeking_score      0.03104186</code></pre>
+<pre class="r"><code># Get results
+EN_perf = mod_elastic$results %&gt;% arrange(desc(Accuracy)) %&gt;% slice(1) </code></pre>
+<p>The resulting model found an optimal alpha of 0.4364 and lambda of
+0.3853. We can see that the features selected to be included in the
+model are Impulsivity and Sensation-Seeking Behaviors.</p>
 </div>
 <div id="logistic-regression-model" class="section level4">
 <h4>Logistic Regression Model</h4>
-<p>To fit the elastic net model, we will train using 10-fold
-cross-validation.</p>
+<p>To fit the elastic net model, we will train the model within caret on
+the training dataset.</p>
 <pre class="r"><code>set.seed(123)
 
-mod_baseline = train(alc_consumption ~ ., data = alc_train, method = &quot;glm&quot;, 
-                 trControl = trainControl(&quot;cv&quot;, number = 10))
+#Fit model
+mod_baseline = train(alc_consumption ~ ., data = alc_train, method = &quot;glm&quot;)
 
+# Get coefficients
 coef(mod_baseline$finalModel)</code></pre>
 <pre><code>##             (Intercept)       neurotocism_score      extroversion_score 
 ##             0.256267278             0.076800543             0.207811698 
@@ -564,6 +567,12 @@ coef(mod_baseline$finalModel)</code></pre>
 ##             0.070023981             0.109476065             0.009103264 
 ##     impulsiveness_score      sens_seeking_score 
 ##             1.862708564             0.304877917</code></pre>
+<pre class="r"><code>#Get performance results - involves some data reshaping to compare final results
+log_perf = mod_baseline$results %&gt;% arrange(desc(Accuracy)) %&gt;% slice_head(n = 1) %&gt;% 
+  mutate(alpha = as.numeric(NA), 
+         parameter = as.numeric(NA)) %&gt;% 
+  rename(lambda = &quot;parameter&quot;) %&gt;% 
+  relocate(alpha, .before = lambda)</code></pre>
 <p>The resulting model includes all features to be fed into the model,
 with Impulsivity and Sensation-Seeking Behaviors having the largest
 effect size as indicated by the magnitude of their coefficients.</p>
@@ -572,7 +581,7 @@ effect size as indicated by the magnitude of their coefficients.</p>
 <h4>LASSO Model</h4>
 <p>To fit the elastic net model, we will train using 10-fold
 cross-validation, and fix alpha to 1. We then create a search grid of
-100 to search for the optimal lambda value.</p>
+varying values to search for the optimal value.</p>
 <pre class="r"><code>set.seed(123)
 
 #Create grid to search lambda
@@ -580,7 +589,8 @@ lambda = 10^seq(-3, 3, length = 100)
 
 #Fit model with tuneGrid
 mod_lasso = train(alc_consumption ~ ., data = alc_train, method = &quot;glmnet&quot;, 
-                  trControl = trainControl(&quot;cv&quot;, number = 10), tuneGrid = expand.grid(alpha = 1, lambda = lambda))
+                  trControl = trainControl(&quot;cv&quot;, number = 10), 
+                  tuneGrid = expand.grid(alpha = 1, lambda = lambda))
 
 #Print the values of alpha and lambda that gave best prediction
 mod_lasso$bestTune</code></pre>
@@ -598,18 +608,76 @@ coef(mod_lasso$finalModel, mod_lasso$bestTune$lambda)</code></pre>
 ## conscientiousness_score .        
 ## impulsiveness_score     0.3152417
 ## sens_seeking_score      .</code></pre>
-<p>The resulting model found an optimal of 0.231. We can see that there
-was only 1 feature, Impulsivity, that was selected to be in the
+<pre class="r"><code># Get results
+LASSO_perf = mod_lasso$results %&gt;% arrange(desc(Accuracy)) %&gt;% slice(3) </code></pre>
+<p>The resulting model found an optimal lambda of 0.231. We can see that
+there was only 1 feature, Impulsivity, that was selected to be in the
 model.</p>
 </div>
+<div id="comparing-performance-across-models" class="section level4">
+<h4>Comparing performance across models</h4>
+<p>Finally, let’s compare the performance of the 3 models.</p>
+<pre class="r"><code>rbind(EN_perf, log_perf, LASSO_perf) %&gt;% 
+  mutate(Model = c(&quot;Elastic Net&quot;, &quot;Baseline&quot;, &quot;LASSO&quot;)) %&gt;% 
+  relocate(Model, .before = alpha) %&gt;% 
+  arrange(desc(Accuracy)) %&gt;% 
+  knitr::kable(digits = 4)</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th align="left">Model</th>
+<th align="right">alpha</th>
+<th align="right">lambda</th>
+<th align="right">Accuracy</th>
+<th align="right">Kappa</th>
+<th align="right">AccuracySD</th>
+<th align="right">KappaSD</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">Elastic Net</td>
+<td align="right">0.4364</td>
+<td align="right">0.3853</td>
+<td align="right">0.8622</td>
+<td align="right">0.7180</td>
+<td align="right">0.0253</td>
+<td align="right">0.0524</td>
+</tr>
+<tr class="even">
+<td align="left">LASSO</td>
+<td align="right">1.0000</td>
+<td align="right">0.2310</td>
+<td align="right">0.8614</td>
+<td align="right">0.7165</td>
+<td align="right">0.0254</td>
+<td align="right">0.0526</td>
+</tr>
+<tr class="odd">
+<td align="left">Baseline</td>
+<td align="right">NA</td>
+<td align="right">NA</td>
+<td align="right">0.8045</td>
+<td align="right">0.6070</td>
+<td align="right">0.0145</td>
+<td align="right">0.0292</td>
+</tr>
+</tbody>
+</table>
+<p>The table shows that the Elastic Net has the best model performance
+as measured by accuracy (86.22%), followed narrowly by the LASSO model
+(86.14%), then the baseline model (80..45%). If I was interested in
+making sure I maximize accuracy, I would go with the Elastic Net model,
+and would select this model to classify current alcohol consumption.</p>
 </div>
-<div id="step-4-model-evaluation" class="section level3">
-<h3>Step 4: Model Evaluation</h3>
-<p>Next, to determine the preferred prediction model, we will apply both
-models to make predictions in the test data. We will use the
+</div>
+<div id="step-4-final-model-evaluation" class="section level3">
+<h3>Step 4: Final Model Evaluation</h3>
+<p>Finally, we will evaluate the performance our final Elastic Net model
+by making predictions in the test data. We will use the
 <code>confusionMatrix()</code> function to get performance measures of
-accuracy, kappa, sensitivity, specificity, and precision (PPV) for each
-candidate model.</p>
+accuracy, kappa, sensitivity, specificity, and precision (PPV) for the
+model.</p>
 <pre class="r"><code>## ELASTIC MODEL
 # Make predictions in test set
 en_pred = mod_elastic %&gt;% predict(alc_test)
@@ -618,38 +686,12 @@ alc_test = alc_test %&gt;% mutate(en_pred = as.factor(en_pred))
 # Model prediction performance
 cm_EN = confusionMatrix(data = alc_test$en_pred, reference = alc_test$alc_consumption, positive = &quot;CurrentUse&quot;)
 
-EN_perf = cbind(cm_EN$overall %&gt;% as_tibble_row(), cm_EN$byClass %&gt;% as_tibble_row()) %&gt;% 
-  dplyr::select(Accuracy, Kappa, Sensitivity, Specificity, Precision)</code></pre>
-<pre class="r"><code>## LOGISTIC REG MODEL
-# Make predictions in test set
-logmod_pred = mod_baseline %&gt;% predict(alc_test)
-alc_test = alc_test %&gt;% mutate(logmod_pred = as.factor(logmod_pred))
-
-# Model prediction performance
-cm_log = confusionMatrix(data = alc_test$logmod_pred, reference = alc_test$alc_consumption, positive = &quot;CurrentUse&quot;)
-
-log_perf = cbind(cm_log$overall %&gt;% as_tibble_row(), cm_log$byClass %&gt;% as_tibble_row()) %&gt;% 
-  dplyr::select(Accuracy, Kappa, Sensitivity, Specificity, Precision)</code></pre>
-<pre class="r"><code>## ELASTIC MODEL
-# Make predictions in test set
-lasso_pred = mod_lasso %&gt;% predict(alc_test)
-alc_test = alc_test %&gt;% mutate(lasso_pred = as.factor(lasso_pred))
-
-# Model prediction performance
-cm_LASSO = confusionMatrix(data = alc_test$lasso_pred, reference = alc_test$alc_consumption, positive = &quot;CurrentUse&quot;)
-
-LASSO_perf = cbind(cm_LASSO$overall %&gt;% as_tibble_row(), cm_LASSO$byClass %&gt;% as_tibble_row()) %&gt;% 
-  dplyr::select(Accuracy, Kappa, Sensitivity, Specificity, Precision)</code></pre>
-<div id="comparing-performance-across-models" class="section level4">
-<h4>Comparing performance across models</h4>
-<p>Finally, let’s compare the performance of the 3 models.</p>
-<pre class="r"><code>rbind(EN_perf, log_perf, LASSO_perf) %&gt;% 
-  mutate(Model = c(&quot;Elastic Net&quot;, &quot;Baseline&quot;, &quot;LASSO&quot;)) %&gt;% 
-  relocate(Model, .before = Accuracy) %&gt;% knitr::kable(digits = 4)</code></pre>
+cbind(cm_EN$overall %&gt;% as_tibble_row(), cm_EN$byClass %&gt;% as_tibble_row()) %&gt;% 
+  dplyr::select(Accuracy, Kappa, Sensitivity, Specificity, Precision) %&gt;% 
+  knitr::kable()</code></pre>
 <table>
 <thead>
 <tr class="header">
-<th align="left">Model</th>
 <th align="right">Accuracy</th>
 <th align="right">Kappa</th>
 <th align="right">Sensitivity</th>
@@ -659,43 +701,21 @@ LASSO_perf = cbind(cm_LASSO$overall %&gt;% as_tibble_row(), cm_LASSO$byClass %&g
 </thead>
 <tbody>
 <tr class="odd">
-<td align="left">Elastic Net</td>
-<td align="right">0.8319</td>
-<td align="right">0.6546</td>
-<td align="right">1.0000</td>
-<td align="right">0.6402</td>
-<td align="right">0.7601</td>
-</tr>
-<tr class="even">
-<td align="left">Baseline</td>
-<td align="right">0.8035</td>
-<td align="right">0.6044</td>
-<td align="right">0.8339</td>
-<td align="right">0.7689</td>
-<td align="right">0.8045</td>
-</tr>
-<tr class="odd">
-<td align="left">LASSO</td>
-<td align="right">0.8319</td>
-<td align="right">0.6546</td>
-<td align="right">1.0000</td>
-<td align="right">0.6402</td>
-<td align="right">0.7601</td>
+<td align="right">0.8318584</td>
+<td align="right">0.6546299</td>
+<td align="right">1</td>
+<td align="right">0.6401515</td>
+<td align="right">0.760101</td>
 </tr>
 </tbody>
 </table>
-<p>The table shows that the elastic net and LASSO models have the same
-accuracy of 83.19%, outperforming the baseline model’s accuracy of
-80.35%. We see that the performance of elastic net and LASSO are also
-the same in terms of sensitivity, specificity, and precision. While the
-baseline model has a slightly lower accuracy, there is slightly better
-trade-off between specificity and sensitivity, resulting in a higher
-specificity, as well as improved precision. However, if I was interested
-in making sure I detect all cases of current alcohol use, I would go
-with the LASSO model, as it is a more parsimonious (simpler) model with
-1 feature compared to the elastic net model with 2 features, while
-having the same predictive performance.</p>
-</div>
+<p>On the testing set, we can see that the accuracy of the Elastic Net
+model has diminished by ~3% to 83.19%, which is what we may expect when
+applying this model on new data. Moreover, we can see the sensitivity of
+the model is 100%, with lower specificity of 64%. This indicates that
+the model is good at detecting all potential cases of current alcohol
+consumption, but may be less useful for distinguishing patients without
+current alcohol consumption (resulting in more false positives).</p>
 </div>
 <div id="research-applications" class="section level3">
 <h3>Research Applications</h3>
@@ -705,7 +725,11 @@ therefore narrow down the list of behavioral tests clinicians may need
 to administer to patients in order to carry out this predictive task.
 One such application could be applying this predictive model to
 patients’ electronic health records to predict current alcohol
-consumption among patients on the basis of behavioral test scores.</p>
+consumption among patients on the basis of behavioral test scores. Of
+course, this comes with several ethical concerns, such as considering
+the harms enacted on patients, notably if the model we selected above
+has a tendency to report false positives in detecting current alcohol
+consumption.</p>
 </div>
 </div>
 
